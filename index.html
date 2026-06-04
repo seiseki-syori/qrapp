@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QRコードリーダー</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr"></script>
+</head>
+<body>
+    <h2>QRコードリーダー</h2>
+    <video id="video" width="300" height="200" autoplay></video>
+    <canvas id="canvas" hidden></canvas>
+    <p>読み取ったQRコード: <span id="result"></span></p>
+
+    <h3>スキャン履歴</h3>
+    <table border="1">
+        <thead>
+            <tr>
+                <th>元のデータ</th>
+                <th>頭3文字</th>
+                <th>次の7文字</th>
+            </tr>
+        </thead>
+        <tbody id="history"></tbody>
+    </table>
+    <button onclick="downloadCSV()">CSVをダウンロード</button>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyBXjJ5dro9a1T_h1VSUH0mgRRgDZh75_sQ",
+            authDomain: "gakko-digital-list.firebaseapp.com",
+            databaseURL: "https://gakko-digital-list-default-rtdb.firebaseio.com/",
+            projectId: "gakko-digital-list",
+            storageBucket: "gakko-digital-list.appspot.com",
+            messagingSenderId: "232515270216",
+            appId: "1:232515270216:web:3e90029e1c17e369e7ca7d"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const context = canvas.getContext("2d");
+        const resultElement = document.getElementById("result");
+        const historyTable = document.getElementById("history");
+        let isScanning = false;
+
+        // ページが読み込まれた時に履歴を削除
+        document.addEventListener("DOMContentLoaded", function () {
+            historyTable.innerHTML = ""; // 履歴テーブルをリセット
+            database.ref('scannedData').remove(); // Firebaseデータを削除
+        });
+
+        function scanQRCode() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA && !isScanning) {
+                isScanning = true;
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
+
+                if (qrCode) {
+                    const fullData = qrCode.data;
+                    const head3 = fullData.substring(0, 3);
+                    const next7 = fullData.substring(3, 10);
+
+                    resultElement.textContent = fullData;
+
+                    const dataRef = database.ref('scannedData');
+                    const newScan = dataRef.push();
+                    newScan.set({ fullData, head3, next7 });
+                }
+                setTimeout(() => { isScanning = false; }, 1000);
+            }
+            requestAnimationFrame(scanQRCode);
+        }
+
+        function addHistoryRow(fullData, head3, next7) {
+            const row = historyTable.insertRow();
+            row.insertCell(0).textContent = fullData;
+            row.insertCell(1).textContent = head3;
+            row.insertCell(2).textContent = next7;
+        }
+
+        function downloadCSV() {
+            let csvContent = "";
+            const rows = historyTable.getElementsByTagName("tr");
+            for (let i = 0; i < rows.length; i++) {
+                let cols = rows[i].getElementsByTagName("td");
+                csvContent += `${cols[0].textContent},${cols[1].textContent},${cols[2].textContent}\n`;
+            }
+            const blob = new Blob([csvContent], { type: "text/csv" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "qr_scan_history.csv";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then((stream) => {
+                video.srcObject = stream;
+                video.setAttribute("playsinline", true);
+                video.play();
+                scanQRCode();
+            })
+            .catch((err) => {
+                console.error("カメラが使用できません", err);
+                alert("カメラのアクセスが拒否されているか、デバイスが見つかりません。ブラウザの設定を確認してください。");
+            });
+
+        database.ref('scannedData').on('child_added', (snapshot) => {
+            const data = snapshot.val();
+            addHistoryRow(data.fullData, data.head3, data.next7);
+        });
+    </script>
+</body>
+</html>
